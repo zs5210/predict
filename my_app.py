@@ -98,10 +98,10 @@ st.markdown(
 st.markdown(
     """
     <div class='rounded-container'>
-        <h2>Predict Organic UV-Vis Absorption Wavelengths</h2>
+        <h2>Predict Organic Fluorescence <br>Emission Wavelengths</h2>
         <blockquote>
-            1. This website aims to quickly predict the absorption wavelength of organic molecules based on their structure (SMILES) and solvent using machine learning models.<br>
-            2. Code and data are available at <a href='https://github.com/dqzs/Fluorescence-Emission-Wavelength-Prediction' target='_blank'>https://github.com/dqzs/Fluorescence-Emission-Wavelength-Prediction</a>.
+            1. This website aims to quickly predict the emission wavelength of organic molecules based on their structure (SMILES) and solvent using machine learning models.<br>
+            2. Code and data are available at <a href='https://github.com/zsdq/Fluorescence-Emission-Wavelength-Prediction' target='_blank'>https://github.com/zsdq/Fluorescence-Emission-Wavelength-Prediction</a>.
         </blockquote>
     </div>
     """,
@@ -212,13 +212,13 @@ smiles = st.text_input("Enter the SMILES representation of the molecule:", place
 submit_button = st.button("Submit and Predict", key="predict_button")
 
 # 指定的描述符列表 - 已更新为所需的特征
-required_descriptors = ["nBondsD", "NumAliphaticHeterocycles", "PEOE_VSA8", "SdssC", "VSA_EState2", "SlogP_VSA10", "SMR_VSA3","SMR_VSA10"]
+required_descriptors = ["nBondsD", "SdssC", "PEOE_VSA8", "SMR_VSA3", "n6HRing", "SMR_VSA10"]
 
 # 缓存模型加载器以避免重复加载
 @st.cache_resource(show_spinner=False, max_entries=1)  # 限制只缓存一个实例
 def load_predictor():
     """缓存模型加载，避免重复加载导致内存溢出"""
-    return TabularPredictor.load("./ag-20250620_005406")
+    return TabularPredictor.load("./ag-20250609_005753")
 
 def mol_to_image(mol, size=(300, 300)):
     """将分子转换为背景颜色为 #f9f9f9f9 的SVG图像"""
@@ -413,7 +413,7 @@ if submit_button:
                 
                 # 合并特征并去除重复列
                 merged_features = merge_features_without_duplicates(rdkit_features, mordred_features)
-                data=merged_features.loc[:, ['nBondsD', 'NumAliphaticHeterocycles', 'PEOE_VSA8', 'SdssC', "VSA_EState2", "SlogP_VSA10", "SMR_VSA3","SMR_VSA10"]]
+                data=merged_features.loc[:, ['nBondsD', 'SdssC', 'PEOE_VSA8', 'SMR_VSA3', 'n6HRing', 'SMR_VSA10']]
 
                 # 创建输入数据表 - 使用新的特征
                 input_data = {
@@ -424,12 +424,10 @@ if submit_button:
                     "SA": [solvent_params["SA"]],
                     "SB": [solvent_params["SB"]],
                     'nBondsD': [data.iloc[0]['nBondsD']], 
-                    'NumAliphaticHeterocycles': [data.iloc[0]['NumAliphaticHeterocycles']], 
-                    'PEOE_VSA8': [data.iloc[0]['PEOE_VSA8']], 
                     'SdssC': [data.iloc[0]['SdssC']], 
-                    'VSA_EState2': [data.iloc[0]['VSA_EState2']], 
-                    'SMR_VSA3': [data.iloc[0]['SMR_VSA3']],
-                    'SlogP_VSA10': [data.iloc[0]['SlogP_VSA10']],
+                    'PEOE_VSA8': [data.iloc[0]['PEOE_VSA8']], 
+                    'SMR_VSA3': [data.iloc[0]['SMR_VSA3']], 
+                    'n6HRing': [data.iloc[0]['n6HRing']], 
                     'SMR_VSA10': [data.iloc[0]['SMR_VSA10']]
                 }
             
@@ -447,12 +445,10 @@ if submit_button:
                     "SA": [solvent_params["SA"]],
                     "SB": [solvent_params["SB"]],
                     'nBondsD': [data.iloc[0]['nBondsD']], 
-                    'NumAliphaticHeterocycles': [data.iloc[0]['NumAliphaticHeterocycles']], 
-                    'PEOE_VSA8': [data.iloc[0]['PEOE_VSA8']], 
                     'SdssC': [data.iloc[0]['SdssC']], 
-                    'VSA_EState2': [data.iloc[0]['VSA_EState2']], 
-                    'SMR_VSA3': [data.iloc[0]['SMR_VSA3']],
-                    'SlogP_VSA10': [data.iloc[0]['SlogP_VSA10']],
+                    'PEOE_VSA8': [data.iloc[0]['PEOE_VSA8']], 
+                    'SMR_VSA3': [data.iloc[0]['SMR_VSA3']], 
+                    'n6HRing': [data.iloc[0]['n6HRing']], 
                     'SMR_VSA10': [data.iloc[0]['SMR_VSA10']]
                 })
                 
@@ -462,9 +458,10 @@ if submit_button:
                     predictor = load_predictor()
                     
                     # 只使用最关键的模型进行预测，减少内存占用
-                    essential_models = [ 'LightGBM',
+                    essential_models = ['CatBoost',
+                                         'LightGBM',
                                          'LightGBMLarge',
-                                         'NeuralNetTorch',
+                                         'RandomForestMSE',
                                          'WeightedEnsemble_L2',
                                          'XGBoost']
                     predict_df_1 = pd.concat([predict_df,predict_df],axis=0)
