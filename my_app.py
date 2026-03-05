@@ -6,103 +6,71 @@ from rdkit.ML.Descriptors import MoleculeDescriptors
 from mordred import Calculator, descriptors
 import pandas as pd
 from autogluon.tabular import TabularPredictor
-import gc  # 添加垃圾回收模块
-import re  # 添加正则表达式模块用于处理SVG
+import gc  
+import re  
 from tqdm import tqdm 
 import numpy as np
 
-# 添加 CSS 样式
+# 1. 页面基本配置 (必须放在脚本最开头)
+st.set_page_config(
+    page_title="Wavelength Predictor",
+    page_icon="🔬",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 2. 优化后的 CSS 样式 (去掉了破坏响应式布局的全局设定，保留卡片美化)
 st.markdown(
     """
     <style>
-    .stApp {
-        border: 2px solid #808080;
-        border-radius: 20px;
-        margin: 50px auto;
-        max-width: 45%; /* 适当加宽以适应两个结果的显示 */
-        background-color: #f9f9f9f9;
-        padding: 20px; 
-        box-sizing: border-box;
-    }
-    .rounded-container h2 {
-        margin-top: -80px;
+    .header-container {
         text-align: center;
-        background-color: #e0e0e0e0;
-        padding: 10px;
-        border-radius: 10px;
+        background-color: #f0f4f8;
+        padding: 30px;
+        border-radius: 15px;
+        margin-bottom: 30px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
     }
-    .rounded-container blockquote {
-        text-align: left;
-        margin: 20px auto;
-        background-color: #f0f0f0;
-        padding: 10px;
-        font-size: 1.1em;
-        border-radius: 10px;
+    .header-container h1 {
+        color: #1E3A8A;
+        font-size: 2.2rem;
+        margin-bottom: 15px;
     }
-    a {
-        color: #0000EE;
-        text-decoration: underline;
-    }
-    .process-text, .molecular-weight {
-        font-family: Arial, sans-serif;
-        font-size: 16px;
-        color: #333;
-    }
-    .stDataFrame {
-        margin-top: 10px;
-        margin-bottom: 0px !important;
+    .header-container p {
+        color: #475569;
+        font-size: 1.1rem;
+        margin: 0;
     }
     .molecule-container {
-        display: block;
-        margin: 20px auto;
-        max-width: 300px;
-        border: 1px solid #ddd;
-        border-radius: 5px;
-        padding: 5px;
-        background-color: transparent; 
-    }
-     /* 针对小屏幕的优化 */
-    @media (max-width: 768px) {
-        .rounded-container {
-            padding: 10px; 
-        }
-        .rounded-container blockquote {
-            font-size: 0.9em; 
-        }
-        .rounded-container h2 {
-            font-size: 1.2em; 
-        }
-        .stApp {
-            padding: 1px !important; 
-            max-width: 99%; 
-        }
-        .process-text, .molecular-weight {
-            font-size: 0.9em; 
-        }
-        .molecule-container {
-            max-width: 200px;
-        }
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin: 0 auto;
+        border: 2px dashed #cbd5e1;
+        border-radius: 10px;
+        padding: 15px;
+        background-color: white;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# 页面标题和简介
+# 3. 页面标题和简介 (使用居中卡片样式)
 st.markdown(
     """
-    <div class='rounded-container'>
-        <h2>Predict Organic UV-Vis Absorption & <br>Fluorescence Emission Wavelengths</h2>
-        <blockquote>
-            1. This website aims to quickly predict both the absorption and emission wavelengths of organic molecules based on their structure (SMILES) and solvent using machine learning models.<br>
-            2. Code and data are available at <a href='https://github.com/dqzs/Fluorescence-Emission-Wavelength-Prediction' target='_blank'>https://github.com/dqzs/Fluorescence-Emission-Wavelength-Prediction</a>.
-        </blockquote>
+    <div class='header-container'>
+        <h1>🌟 Organic UV-Vis & Fluorescence Wavelength Predictor</h1>
+        <p>Predict both absorption and emission wavelengths of organic molecules based on their structure (SMILES) and solvent.</p>
+        <p style="font-size: 0.9rem; margin-top: 10px;">
+            Code and data: <a href='https://github.com/dqzs/Fluorescence-Emission-Wavelength-Prediction' target='_blank'>GitHub Repository</a>
+        </p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# 溶剂数据字典
+# --- 字典与函数定义保持不变 ---
 solvent_data = {
     "H2O": {"Et30": 63.1, "SP": 0.681, "SdP": 0.997, "SA": 1.062, "SB": 0.025},
     "MeOH": {"Et30": 55.4, "SP": 0.608, "SdP": 0.904, "SA": 0.605, "SB": 0.545},
@@ -195,23 +163,10 @@ solvent_data = {
     "N-Methylformamide": {"Et30": 54.1, "SP": 0.759, "SdP": 0.977, "SA": 0.031, "SB": 0.613}
 }
 
-# 溶剂选择下拉菜单
-solvent = st.selectbox("Select Solvent:", list(solvent_data.keys()))
-
-# SMILES 输入区域
-smiles = st.text_input("Enter the SMILES representation of the molecule:", placeholder="e.g., [BH3-][P+]1(c2ccccc2)c2ccccc2-c2sc3ccccc3c21,Solvent:Cyclohexane")
-
-# 提交按钮
-submit_button = st.button("Submit and Predict", key="predict_button")
-
-# 定义吸收和发射的各自特征列
 features_abs = ['nBondsD', 'NumAliphaticHeterocycles', 'PEOE_VSA8', 'SdssC', "VSA_EState2", "SlogP_VSA10", "SMR_VSA3","SMR_VSA10"]
 features_em = ["nBondsD", "SdssC", "PEOE_VSA8", "SMR_VSA3", "n6HRing", "SMR_VSA10"]
-
-# 提取所有的必须描述符（用于计算，避免重复算）
 all_required_features = list(set(features_abs + features_em))
 
-# 分别缓存两个模型，避免重复加载
 @st.cache_resource(show_spinner=False, max_entries=1)
 def load_predictor_abs():
     return TabularPredictor.load("./ag-20250620_005406")
@@ -223,7 +178,7 @@ def load_predictor_em():
 def mol_to_image(mol, size=(300, 300)):
     d2d = MolDraw2DSVG(size[0], size[1])
     draw_options = d2d.drawOptions()
-    draw_options.background = '#f9f9f9'
+    draw_options.background = '#ffffff' # 改为纯白背景更好看
     draw_options.padding = 0.0
     draw_options.additionalBondPadding = 0.0
     draw_options.annotationFontScale = 1.0
@@ -249,13 +204,11 @@ def calc_rdkit_descriptors(smiles_list):
     calculator = MoleculeDescriptors.MolecularDescriptorCalculator(desc_names)
     results = []
     valid_indices = []
-    
     for idx, smi in tqdm(enumerate(smiles_list), total=len(smiles_list), desc="Calculating RDKit descriptors"):
         try:
             mol = Chem.MolFromSmiles(smi)
             mol = Chem.AddHs(mol)
             descriptors = calculator.CalcDescriptors(mol)
-            
             processed_descriptors = []
             for val in descriptors:
                 if isinstance(val, float) and (np.isnan(val) or np.isinf(val)):
@@ -264,26 +217,21 @@ def calc_rdkit_descriptors(smiles_list):
                     processed_descriptors.append(np.nan)
                 else:
                     processed_descriptors.append(val)
-            
             results.append(processed_descriptors)
             valid_indices.append(idx)
         except Exception:
             continue
-            
-    df_desc = pd.DataFrame(results, columns=desc_names, index=valid_indices)
-    return df_desc
+    return pd.DataFrame(results, columns=desc_names, index=valid_indices)
 
 def calc_mordred_descriptors(smiles_list):
     calc = Calculator(descriptors, ignore_3D=True)
     results = []
     valid_smiles = []
-    
     for smi in tqdm(smiles_list, desc="Calculating Mordred descriptors"):
         try:
             mol = Chem.MolFromSmiles(smi)
             mol = Chem.AddHs(mol)
             res = calc(mol)
-            
             descriptor_dict = {}
             for key, val in res.asdict().items():
                 if isinstance(val, float) and (np.isnan(val) or np.isinf(val)):
@@ -294,12 +242,10 @@ def calc_mordred_descriptors(smiles_list):
                     descriptor_dict[key] = np.nan
                 else:
                     descriptor_dict[key] = val
-            
             results.append(descriptor_dict)
             valid_smiles.append(smi)
         except Exception:
             continue
-            
     df_mordred = pd.DataFrame(results)
     df_mordred['SMILES'] = valid_smiles
     return df_mordred
@@ -309,44 +255,54 @@ def merge_features_without_duplicates(original_df, *feature_dfs):
     merged = merged.loc[:, ~merged.columns.duplicated()]
     return merged
 
+# ==========================================
+# 4. 界面布局：侧边栏 (Sidebar) 作为输入区
+# ==========================================
+with st.sidebar:
+    st.header("⚙️ Input Parameters")
+    st.markdown("---")
+    
+    smiles = st.text_input(
+        "1. Enter SMILES:", 
+        placeholder="e.g., [BH3-][P+]1(c2ccccc2)c2ccccc2-c2sc3ccccc3c21"
+    )
+    
+    solvent = st.selectbox(
+        "2. Select Solvent:", 
+        list(solvent_data.keys())
+    )
+    
+    st.markdown("---")
+    submit_button = st.button("🚀 Predict Now", type="primary", use_container_width=True)
+
+
+# ==========================================
+# 5. 界面布局：主干区域展示结果
+# ==========================================
 if submit_button:
     if not smiles:
-        st.error("Please enter a valid SMILES string.")
+        st.warning("⚠️ Please enter a valid SMILES string in the sidebar.")
     elif not solvent:
-        st.error("Please select a solvent.")
+        st.warning("⚠️ Please select a solvent in the sidebar.")
     else:
         with st.spinner("Processing molecule and making predictions..."):
             try:
                 mol = Chem.MolFromSmiles(smiles)
                 if not mol:
-                    st.error("Invalid SMILES input. Please check the format.")
+                    st.error("❌ Invalid SMILES input. Please check the format.")
                     st.stop()
                 
                 mol = Chem.AddHs(mol)
                 AllChem.Compute2DCoords(mol)
 
-                svg = mol_to_image(mol)
-                st.markdown(
-                    f'<div class="molecule-container" style="background-color: #f9f9f9; padding: 0; border: none;">{svg}</div>', 
-                    unsafe_allow_html=True
-                )
-                
-                mol_weight = Descriptors.MolWt(mol)
-                st.markdown(f'<div class="molecular-weight" style="text-align: center;">Molecular Weight: {mol_weight:.2f} g/mol</div>',
-                            unsafe_allow_html=True)
-
+                # 计算特征
                 solvent_params = solvent_data[solvent]
-                
                 smiles_list = [smiles] 
                 rdkit_features = calc_rdkit_descriptors(smiles_list)
                 mordred_features = calc_mordred_descriptors(smiles_list)
-                
                 merged_features = merge_features_without_duplicates(rdkit_features, mordred_features)
-                
-                # 提取两个模型需要的所有特征
                 data = merged_features.loc[:, all_required_features]
 
-                # 基础溶剂特征
                 base_solvent_dict = {
                     "Et30": [solvent_params["Et30"]],
                     "SP": [solvent_params["SP"]],
@@ -355,56 +311,75 @@ if submit_button:
                     "SB": [solvent_params["SB"]]
                 }
                 
-                # ==== 吸收预测数据准备 ====
                 predict_dict_abs = base_solvent_dict.copy()
                 for feat in features_abs:
                     predict_dict_abs[feat] = [data.iloc[0][feat]]
                 predict_df_abs = pd.DataFrame(predict_dict_abs)
                 
-                # ==== 发射预测数据准备 ====
                 predict_dict_em = base_solvent_dict.copy()
                 for feat in features_em:
                     predict_dict_em[feat] = [data.iloc[0][feat]]
                 predict_df_em = pd.DataFrame(predict_dict_em)
 
-                # 显示基础输入数据 (可以显示合集或只展示核心溶剂特征)
-                st.write("Input Data (Base Features):")
-                st.dataframe(pd.DataFrame(base_solvent_dict))
-
                 try:
-                    # 加载模型
+                    # 加载模型并预测
                     predictor_abs = load_predictor_abs()
                     predictor_em = load_predictor_em()
                     
-                    # 为了避免Autogluon的1行警告，复制1行（后面对结果切片）
                     predict_df_abs_1 = pd.concat([predict_df_abs, predict_df_abs], axis=0)
                     predict_df_em_1 = pd.concat([predict_df_em, predict_df_em], axis=0)
-
                     
-                    predictions_results = {}
-                    
-                    # 预测吸收波长
                     try:
                         pred_abs = predictor_abs.predict(predict_df_abs_1)
-                        predictions_results['Absorption Wavelength (nm)'] = [f"{int(pred_abs.iloc[0])} nm"]
+                        res_abs = f"{int(pred_abs.iloc[0])} nm"
                     except Exception as e:
-                        predictions_results['Absorption Wavelength (nm)'] = ["Error"]
+                        res_abs = "Error"
                         st.warning(f"Absorption model prediction failed: {str(e)}")
 
-                    # 预测发射波长
                     try:
                         pred_em = predictor_em.predict(predict_df_em_1)
-                        predictions_results['Emission Wavelength (nm)'] = [f"{int(pred_em.iloc[0])} nm"]
+                        res_em = f"{int(pred_em.iloc[0])} nm"
                     except Exception as e:
-                        predictions_results['Emission Wavelength (nm)'] = ["Error"]
+                        res_em = "Error"
                         st.warning(f"Emission model prediction failed: {str(e)}")
 
-                    # 展示结果
-                    st.write("Prediction Results (Using WeightedEnsemble_L2):")
-                    results_df = pd.DataFrame(predictions_results)
-                    st.dataframe(results_df)
+                    st.success("✅ Prediction completed successfully!")
+
+                    # --- 核心视觉展示区：左右分栏 ---
+                    col1, col2 = st.columns([1, 1.5], gap="large")
                     
-                    # 内存清理
+                    with col1:
+                        st.subheader("🧬 Molecule Structure")
+                        svg = mol_to_image(mol)
+                        st.markdown(
+                            f'<div class="molecule-container">{svg}</div>', 
+                            unsafe_allow_html=True
+                        )
+                        mol_weight = Descriptors.MolWt(mol)
+                        st.caption(f"**Molecular Weight:** {mol_weight:.2f} g/mol")
+
+                    with col2:
+                        st.subheader("📊 Prediction Results")
+                        st.markdown(f"**Solvent:** `{solvent}`")
+                        
+                        # 使用强大的 st.metric 组件展示核心数据
+                        m_col1, m_col2 = st.columns(2)
+                        with m_col1:
+                            st.metric(label="🔵 Absorption Wavelength", value=res_abs)
+                        with m_col2:
+                            st.metric(label="🟢 Emission Wavelength", value=res_em)
+                            
+                    st.markdown("---")
+                    
+                    # 将枯燥的数据表格收纳进 expander 中
+                    with st.expander("🔍 View Technical Details & Extracted Features"):
+                        st.write("Base Solvent Features:")
+                        st.dataframe(pd.DataFrame(base_solvent_dict), use_container_width=True)
+                        st.write("Full Extracted Features for Absorption:")
+                        st.dataframe(predict_df_abs, use_container_width=True)
+                        st.write("Full Extracted Features for Emission:")
+                        st.dataframe(predict_df_em, use_container_width=True)
+
                     gc.collect()
 
                 except Exception as e:
@@ -412,3 +387,6 @@ if submit_button:
 
             except Exception as e:
                 st.error(f"An error occurred: {str(e)}")
+else:
+    # 刚进入页面时显示的占位提示
+    st.info("👈 Please enter the SMILES string and select a solvent in the sidebar to start prediction.")
